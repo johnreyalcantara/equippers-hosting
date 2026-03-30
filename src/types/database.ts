@@ -54,14 +54,18 @@ export interface GroupWithRows extends Group {
   rows: RowWithSeats[];
 }
 
+function toLocalDateStr(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
 export function getEventStatus(event: Event): EventStatus {
   const now = new Date();
   const startDate = new Date(event.start_time);
   const endDate = new Date(event.end_time);
 
-  // Get date-only comparisons for start date
-  const todayStr = now.toISOString().split("T")[0];
-  const startDateStr = startDate.toISOString().split("T")[0];
+  // Compare dates in local timezone
+  const todayStr = toLocalDateStr(now);
+  const startDateStr = toLocalDateStr(startDate);
 
   // Before event date: CLOSED
   if (todayStr < startDateStr) return "closed";
