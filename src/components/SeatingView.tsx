@@ -24,7 +24,9 @@ export default function SeatingView({
     seatId: string | null;
     startX: number;
     startY: number;
-  }>({ timer: null, didLongPress: false, seatId: null, startX: 0, startY: 0 });
+    isTouch: boolean;
+    lastTouchEnd: number;
+  }>({ timer: null, didLongPress: false, seatId: null, startX: 0, startY: 0, isTouch: false, lastTouchEnd: 0 });
 
   // Calculate live seat counts
   const allSeats = groups.flatMap((g) => g.rows.flatMap((r) => r.seats));
@@ -126,14 +128,16 @@ export default function SeatingView({
     }
   }
 
-  function onPressStart(seat: Seat, clientX: number, clientY: number) {
+  function onTouchPressStart(seat: Seat, clientX: number, clientY: number) {
     clearPress();
     pressState.current = {
+      ...pressState.current,
       timer: null,
       didLongPress: false,
       seatId: seat.id,
       startX: clientX,
       startY: clientY,
+      isTouch: true,
     };
     pressState.current.timer = setTimeout(() => {
       pressState.current.didLongPress = true;
@@ -142,7 +146,39 @@ export default function SeatingView({
     }, LONG_PRESS_MS);
   }
 
-  function onPressEnd(seat: Seat) {
+  function onMousePressStart(seat: Seat, clientX: number, clientY: number) {
+    // Ignore synthetic mouse events after touch
+    if (Date.now() - pressState.current.lastTouchEnd < 500) return;
+    clearPress();
+    pressState.current = {
+      ...pressState.current,
+      timer: null,
+      didLongPress: false,
+      seatId: seat.id,
+      startX: clientX,
+      startY: clientY,
+      isTouch: false,
+    };
+    pressState.current.timer = setTimeout(() => {
+      pressState.current.didLongPress = true;
+      pressState.current.timer = null;
+      handleLongPress(seat);
+    }, LONG_PRESS_MS);
+  }
+
+  function onTouchPressEnd(seat: Seat) {
+    if (pressState.current.seatId !== seat.id) return;
+    clearPress();
+    pressState.current.lastTouchEnd = Date.now();
+    if (!pressState.current.didLongPress) {
+      handleTap(seat);
+    }
+    pressState.current.seatId = null;
+  }
+
+  function onMousePressEnd(seat: Seat) {
+    // Ignore synthetic mouse events after touch
+    if (Date.now() - pressState.current.lastTouchEnd < 500) return;
     if (pressState.current.seatId !== seat.id) return;
     clearPress();
     if (!pressState.current.didLongPress) {
@@ -215,12 +251,12 @@ export default function SeatingView({
                         .map((seat) => (
                           <button
                             key={seat.id}
-                            onMouseDown={(e) => onPressStart(seat, e.clientX, e.clientY)}
-                            onMouseUp={() => onPressEnd(seat)}
+                            onMouseDown={(e) => onMousePressStart(seat, e.clientX, e.clientY)}
+                            onMouseUp={() => onMousePressEnd(seat)}
                             onMouseLeave={onPressCancel}
                             onTouchStart={(e) => {
                               const touch = e.touches[0];
-                              onPressStart(seat, touch.clientX, touch.clientY);
+                              onTouchPressStart(seat, touch.clientX, touch.clientY);
                             }}
                             onTouchMove={(e) => {
                               const touch = e.touches[0];
@@ -228,7 +264,7 @@ export default function SeatingView({
                             }}
                             onTouchEnd={(e) => {
                               e.preventDefault();
-                              onPressEnd(seat);
+                              onTouchPressEnd(seat);
                             }}
                             onTouchCancel={onPressCancel}
                             onContextMenu={(e) => e.preventDefault()}
