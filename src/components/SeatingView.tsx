@@ -1,8 +1,10 @@
 "use client";
 
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import { createClient } from "@/lib/supabase/client";
 import type { GroupWithRows, Seat } from "@/types/database";
+
+const LONG_PRESS_MS = 500;
 
 interface SeatingViewProps {
   eventId: string;
@@ -16,11 +18,15 @@ export default function SeatingView({
   const [groups, setGroups] = useState<GroupWithRows[]>(initialGroups);
   const [toggling, setToggling] = useState<string | null>(null);
   const supabase = createClient();
+  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const didLongPress = useRef(false);
 
   // Calculate live seat counts
   const allSeats = groups.flatMap((g) => g.rows.flatMap((r) => r.seats));
   const totalSeats = allSeats.length;
   const occupiedSeats = allSeats.filter((s) => s.status === "occupied").length;
+  const vipSeats = allSeats.filter((s) => s.status === "vip").length;
+  const availableSeats = totalSeats - occupiedSeats - vipSeats;
 
   const updateSeatInState = useCallback((updatedSeat: Seat) => {
     setGroups((prev) =>
@@ -64,11 +70,9 @@ export default function SeatingView({
     };
   }, [eventId, groups, supabase, updateSeatInState]);
 
-  async function toggleSeat(seat: Seat) {
+  async function updateSeatStatus(seat: Seat, newStatus: Seat["status"]) {
     if (toggling) return;
     setToggling(seat.id);
-
-    const newStatus = seat.status === "available" ? "occupied" : "available";
 
     // Optimistic update
     updateSeatInState({ ...seat, status: newStatus });
@@ -89,15 +93,71 @@ export default function SeatingView({
     setToggling(null);
   }
 
+  function handleTap(seat: Seat) {
+    // Tap cycles: available → occupied → available
+    // If VIP, tap turns it back to available
+    if (seat.status === "vip") {
+      updateSeatStatus(seat, "available");
+    } else {
+      const newStatus = seat.status === "available" ? "occupied" : "available";
+      updateSeatStatus(seat, newStatus);
+    }
+  }
+
+  function handleLongPress(seat: Seat) {
+    // Long press toggles VIP
+    const newStatus = seat.status === "vip" ? "available" : "vip";
+    updateSeatStatus(seat, newStatus);
+  }
+
+  function onPressStart(seat: Seat) {
+    didLongPress.current = false;
+    longPressTimer.current = setTimeout(() => {
+      didLongPress.current = true;
+      handleLongPress(seat);
+    }, LONG_PRESS_MS);
+  }
+
+  function onPressEnd(seat: Seat) {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+    if (!didLongPress.current) {
+      handleTap(seat);
+    }
+  }
+
+  function onPressCancel() {
+    if (longPressTimer.current) {
+      clearTimeout(longPressTimer.current);
+      longPressTimer.current = null;
+    }
+  }
+
+  function seatColor(status: Seat["status"]) {
+    switch (status) {
+      case "available":
+        return "bg-green-400 hover:bg-green-500";
+      case "occupied":
+        return "bg-red-400 hover:bg-red-500";
+      case "vip":
+        return "bg-yellow-400 hover:bg-yellow-500";
+    }
+  }
+
   return (
     <div>
       {/* Live seat count bar */}
-      <div className="sticky top-0 bg-white border-b border-gray-200 py-2 px-1 mb-4 flex gap-4 text-sm z-10">
+      <div className="sticky top-0 bg-white border-b border-gray-200 py-2 px-1 mb-4 flex flex-wrap gap-3 text-sm z-10">
         <span className="text-green-600 font-medium">
-          Available: {totalSeats - occupiedSeats}
+          Available: {availableSeats}
         </span>
         <span className="text-red-600 font-medium">
           Occupied: {occupiedSeats}
+        </span>
+        <span className="text-yellow-600 font-medium">
+          VIP: {vipSeats}
         </span>
         <span className="text-gray-500">Total: {totalSeats}</span>
       </div>
@@ -125,16 +185,21 @@ export default function SeatingView({
                         .map((seat) => (
                           <button
                             key={seat.id}
-                            onClick={() => toggleSeat(seat)}
+                            onMouseDown={() => onPressStart(seat)}
+                            onMouseUp={() => onPressEnd(seat)}
+                            onMouseLeave={onPressCancel}
+                            onTouchStart={() => onPressStart(seat)}
+                            onTouchEnd={(e) => {
+                              e.preventDefault();
+                              onPressEnd(seat);
+                            }}
+                            onTouchCancel={onPressCancel}
+                            onContextMenu={(e) => e.preventDefault()}
                             disabled={toggling === seat.id}
                             className={`
                               rounded-2xl border-2 border-black w-12 h-12 flex items-center justify-center
-                              font-bold text-sm transition-all duration-200 active:scale-90
-                              ${
-                                seat.status === "available"
-                                  ? "bg-green-400 hover:bg-green-500"
-                                  : "bg-red-400 hover:bg-red-500"
-                              }
+                              font-bold text-sm transition-all duration-200 active:scale-90 select-none
+                              ${seatColor(seat.status)}
                               ${toggling === seat.id ? "opacity-50" : ""}
                             `}
                           >

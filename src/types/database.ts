@@ -40,7 +40,7 @@ export interface Seat {
   id: string;
   row_id: string;
   seat_number: number;
-  status: "available" | "occupied";
+  status: "available" | "occupied" | "vip";
   updated_at: string;
   updated_by: string | null;
 }

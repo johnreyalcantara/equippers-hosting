@@ -53,6 +53,10 @@ export default async function EventDetailPage({
   const occupiedSeats = allSeats.filter(
     (s: { status: string }) => s.status === "occupied"
   ).length;
+  const vipSeats = allSeats.filter(
+    (s: { status: string }) => s.status === "vip"
+  ).length;
+  const availableSeats = totalSeats - occupiedSeats - vipSeats;
 
   return (
     <div>
