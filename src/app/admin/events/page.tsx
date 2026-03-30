@@ -30,7 +30,7 @@ export default function AdminEventsPage() {
     const { data } = await supabase
       .from("events")
       .select("*")
-      .order("start_time", { ascending: false });
+      .order("start_time", { ascending: true });
     if (data) setEvents(data);
   }
 
