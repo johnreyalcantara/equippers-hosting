@@ -4,6 +4,13 @@ import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useRouter, useParams } from "next/navigation";
 
+function toLocalDatetimeString(utcString: string): string {
+  const date = new Date(utcString);
+  const offset = date.getTimezoneOffset();
+  const local = new Date(date.getTime() - offset * 60000);
+  return local.toISOString().slice(0, 16);
+}
+
 export default function EditEventPage() {
   const { id } = useParams<{ id: string }>();
   const [name, setName] = useState("");
@@ -26,8 +33,8 @@ export default function EditEventPage() {
       if (data) {
         setName(data.name);
         setDescription(data.description || "");
-        setStartTime(data.start_time.slice(0, 16));
-        setEndTime(data.end_time.slice(0, 16));
+        setStartTime(toLocalDatetimeString(data.start_time));
+        setEndTime(toLocalDatetimeString(data.end_time));
       }
     }
     load();
