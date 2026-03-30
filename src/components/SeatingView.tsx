@@ -16,10 +16,15 @@ export default function SeatingView({
   initialGroups,
 }: SeatingViewProps) {
   const [groups, setGroups] = useState<GroupWithRows[]>(initialGroups);
-  const [toggling, setToggling] = useState<string | null>(null);
+  const [toggling, setToggling] = useState<Set<string>>(new Set());
   const supabase = createClient();
-  const longPressTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
-  const didLongPress = useRef(false);
+  const pressState = useRef<{
+    timer: ReturnType<typeof setTimeout> | null;
+    didLongPress: boolean;
+    seatId: string | null;
+    startX: number;
+    startY: number;
+  }>({ timer: null, didLongPress: false, seatId: null, startX: 0, startY: 0 });
 
   // Calculate live seat counts
   const allSeats = groups.flatMap((g) => g.rows.flatMap((r) => r.seats));
@@ -71,8 +76,8 @@ export default function SeatingView({
   }, [eventId, groups, supabase, updateSeatInState]);
 
   async function updateSeatStatus(seat: Seat, newStatus: Seat["status"]) {
-    if (toggling) return;
-    setToggling(seat.id);
+    if (toggling.has(seat.id)) return;
+    setToggling((prev) => new Set(prev).add(seat.id));
 
     // Optimistic update
     updateSeatInState({ ...seat, status: newStatus });
@@ -90,7 +95,11 @@ export default function SeatingView({
       updateSeatInState(seat);
     }
 
-    setToggling(null);
+    setToggling((prev) => {
+      const next = new Set(prev);
+      next.delete(seat.id);
+      return next;
+    });
   }
 
   function handleTap(seat: Seat) {
@@ -110,29 +119,50 @@ export default function SeatingView({
     updateSeatStatus(seat, newStatus);
   }
 
-  function onPressStart(seat: Seat) {
-    didLongPress.current = false;
-    longPressTimer.current = setTimeout(() => {
-      didLongPress.current = true;
+  function clearPress() {
+    if (pressState.current.timer) {
+      clearTimeout(pressState.current.timer);
+      pressState.current.timer = null;
+    }
+  }
+
+  function onPressStart(seat: Seat, clientX: number, clientY: number) {
+    clearPress();
+    pressState.current = {
+      timer: null,
+      didLongPress: false,
+      seatId: seat.id,
+      startX: clientX,
+      startY: clientY,
+    };
+    pressState.current.timer = setTimeout(() => {
+      pressState.current.didLongPress = true;
+      pressState.current.timer = null;
       handleLongPress(seat);
     }, LONG_PRESS_MS);
   }
 
   function onPressEnd(seat: Seat) {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
-    if (!didLongPress.current) {
+    if (pressState.current.seatId !== seat.id) return;
+    clearPress();
+    if (!pressState.current.didLongPress) {
       handleTap(seat);
+    }
+    pressState.current.seatId = null;
+  }
+
+  function onPressMove(clientX: number, clientY: number) {
+    // Cancel long press if finger moved more than 10px
+    const dx = clientX - pressState.current.startX;
+    const dy = clientY - pressState.current.startY;
+    if (dx * dx + dy * dy > 100) {
+      clearPress();
     }
   }
 
   function onPressCancel() {
-    if (longPressTimer.current) {
-      clearTimeout(longPressTimer.current);
-      longPressTimer.current = null;
-    }
+    clearPress();
+    pressState.current.seatId = null;
   }
 
   function seatColor(status: Seat["status"]) {
@@ -185,22 +215,30 @@ export default function SeatingView({
                         .map((seat) => (
                           <button
                             key={seat.id}
-                            onMouseDown={() => onPressStart(seat)}
+                            onMouseDown={(e) => onPressStart(seat, e.clientX, e.clientY)}
                             onMouseUp={() => onPressEnd(seat)}
                             onMouseLeave={onPressCancel}
-                            onTouchStart={() => onPressStart(seat)}
+                            onTouchStart={(e) => {
+                              const touch = e.touches[0];
+                              onPressStart(seat, touch.clientX, touch.clientY);
+                            }}
+                            onTouchMove={(e) => {
+                              const touch = e.touches[0];
+                              onPressMove(touch.clientX, touch.clientY);
+                            }}
                             onTouchEnd={(e) => {
                               e.preventDefault();
                               onPressEnd(seat);
                             }}
                             onTouchCancel={onPressCancel}
                             onContextMenu={(e) => e.preventDefault()}
-                            disabled={toggling === seat.id}
+                            disabled={toggling.has(seat.id)}
+                            style={{ touchAction: "none", WebkitTouchCallout: "none" }}
                             className={`
                               rounded-2xl border-2 border-black w-12 h-12 flex items-center justify-center
                               font-bold text-sm transition-all duration-200 active:scale-90 select-none
                               ${seatColor(seat.status)}
-                              ${toggling === seat.id ? "opacity-50" : ""}
+                              ${toggling.has(seat.id) ? "opacity-50" : ""}
                             `}
                           >
                             {seat.seat_number}
