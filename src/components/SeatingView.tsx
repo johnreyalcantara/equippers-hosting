@@ -16,23 +16,23 @@ export default function SeatingView({
   initialGroups,
 }: SeatingViewProps) {
   const [groups, setGroups] = useState<GroupWithRows[]>(initialGroups);
-  const [toggling, setToggling] = useState<Set<string>>(new Set());
   const supabase = createClient();
 
-  // Refs for long press — refs avoid stale closure issues
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const longPressedRef = useRef(false);
-
-  // Calculate live seat counts
-  const allSeats = groups.flatMap((g) => g.rows.flatMap((r) => r.seats));
-  const totalSeats = allSeats.length;
-  const occupiedSeats = allSeats.filter((s) => s.status === "occupied").length;
-  const vipSeats = allSeats.filter((s) => s.status === "vip").length;
-  const availableSeats = totalSeats - occupiedSeats - vipSeats;
+  const busyRef = useRef<Set<string>>(new Set());
 
   // Use a ref to always have the latest groups for DB operations
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
+
+  // Calculate live seat counts
+  const allSeats = groups.flatMap((g) => g.rows.flatMap((r) => r.seats));
+  const totalSeats = allSeats.length;
+  const vipSeats = allSeats.filter((s) => s.status === "vip").length;
+  const occupiedSeats =
+    allSeats.filter((s) => s.status === "occupied").length + vipSeats;
+  const availableSeats = totalSeats - occupiedSeats;
 
   const updateSeatInState = useCallback((updatedSeat: Seat) => {
     setGroups((prev) =>
@@ -76,7 +76,6 @@ export default function SeatingView({
     };
   }, [eventId, groups, supabase, updateSeatInState]);
 
-  // Get the latest seat from state by ID (avoids stale closures)
   function getLatestSeat(seatId: string): Seat | null {
     for (const g of groupsRef.current) {
       for (const r of g.rows) {
@@ -89,14 +88,13 @@ export default function SeatingView({
   }
 
   async function updateSeatStatus(seatId: string, newStatus: Seat["status"]) {
+    if (busyRef.current.has(seatId)) return;
     const seat = getLatestSeat(seatId);
     if (!seat || seat.status === newStatus) return;
 
-    setToggling((prev) => new Set(prev).add(seatId));
-
+    busyRef.current.add(seatId);
     const oldStatus = seat.status;
 
-    // Optimistic update
     updateSeatInState({ ...seat, status: newStatus });
 
     const { error } = await supabase
@@ -106,17 +104,13 @@ export default function SeatingView({
         updated_at: new Date().toISOString(),
       })
       .eq("id", seatId)
-      .eq("status", oldStatus); // Optimistic lock
+      .eq("status", oldStatus);
 
     if (error) {
       updateSeatInState({ ...seat, status: oldStatus });
     }
 
-    setToggling((prev) => {
-      const next = new Set(prev);
-      next.delete(seatId);
-      return next;
-    });
+    busyRef.current.delete(seatId);
   }
 
   function handleTap(seatId: string) {
@@ -139,6 +133,7 @@ export default function SeatingView({
 
   function onPointerDown(seatId: string) {
     longPressedRef.current = false;
+    if (timerRef.current) clearTimeout(timerRef.current);
     timerRef.current = setTimeout(() => {
       longPressedRef.current = true;
       timerRef.current = null;
@@ -153,7 +148,6 @@ export default function SeatingView({
     }
   }
 
-  // onClick fires after touchend/mouseup — use it for tap so we don't fight the browser
   function onSeatClick(seatId: string) {
     if (longPressedRef.current) {
       longPressedRef.current = false;
@@ -220,13 +214,11 @@ export default function SeatingView({
                             onMouseLeave={onPointerUp}
                             onClick={() => onSeatClick(seat.id)}
                             onContextMenu={(e) => e.preventDefault()}
-                            disabled={toggling.has(seat.id)}
                             style={{ touchAction: "manipulation", WebkitTouchCallout: "none", WebkitUserSelect: "none" }}
                             className={`
                               rounded-2xl border-2 border-black w-12 h-12 flex items-center justify-center
                               font-bold text-sm transition-all duration-200 active:scale-90 select-none
                               ${seatColor(seat.status)}
-                              ${toggling.has(seat.id) ? "opacity-50" : ""}
                             `}
                           >
                             {seat.seat_number}
