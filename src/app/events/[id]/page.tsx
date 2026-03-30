@@ -23,6 +23,18 @@ export default async function EventDetailPage({
 
   const status = getEventStatus(event);
 
+  const {
+    data: { user },
+  } = await supabase.auth.getUser();
+
+  const { data: profile } = await supabase
+    .from("profiles")
+    .select("role")
+    .eq("id", user!.id)
+    .single();
+
+  const isAdmin = profile?.role === "admin";
+
   const { data: groups } = await supabase
     .from("groups")
     .select("*, rows(*, seats(*))")
@@ -89,7 +101,7 @@ export default async function EventDetailPage({
           This event is currently closed. Seating is not available.
         </div>
       ) : (
-        <SeatingView eventId={id} initialGroups={sortedGroups} />
+        <SeatingView eventId={id} initialGroups={sortedGroups} currentUserId={user!.id} isAdmin={isAdmin} />
       )}
     </div>
   );

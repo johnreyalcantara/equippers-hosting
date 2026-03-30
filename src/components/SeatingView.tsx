@@ -9,11 +9,15 @@ const LONG_PRESS_MS = 500;
 interface SeatingViewProps {
   eventId: string;
   initialGroups: GroupWithRows[];
+  currentUserId: string;
+  isAdmin: boolean;
 }
 
 export default function SeatingView({
   eventId,
   initialGroups,
+  currentUserId,
+  isAdmin,
 }: SeatingViewProps) {
   const [groups, setGroups] = useState<GroupWithRows[]>(initialGroups);
   const supabase = createClient();
@@ -22,7 +26,6 @@ export default function SeatingView({
   const longPressedRef = useRef(false);
   const busyRef = useRef<Set<string>>(new Set());
 
-  // Use a ref to always have the latest groups for DB operations
   const groupsRef = useRef(groups);
   groupsRef.current = groups;
 
@@ -48,7 +51,6 @@ export default function SeatingView({
     );
   }, []);
 
-  // Subscribe to real-time changes on the seats table
   useEffect(() => {
     const rowIds = groups.flatMap((g) => g.rows.map((r) => r.id));
     if (rowIds.length === 0) return;
@@ -87,8 +89,29 @@ export default function SeatingView({
     return null;
   }
 
+  function getRowForSeat(seatId: string) {
+    for (const g of groupsRef.current) {
+      for (const r of g.rows) {
+        for (const s of r.seats) {
+          if (s.id === seatId) return r;
+        }
+      }
+    }
+    return null;
+  }
+
+  function canEditSeat(seatId: string): boolean {
+    if (isAdmin) return true;
+    const row = getRowForSeat(seatId);
+    if (!row) return false;
+    // No assigned user means anyone can edit
+    if (!row.assigned_user) return true;
+    return row.assigned_user === currentUserId;
+  }
+
   async function updateSeatStatus(seatId: string, newStatus: Seat["status"]) {
     if (busyRef.current.has(seatId)) return;
+    if (!canEditSeat(seatId)) return;
     const seat = getLatestSeat(seatId);
     if (!seat || seat.status === newStatus) return;
 
@@ -195,38 +218,51 @@ export default function SeatingView({
                 {group.name}
               </h3>
               <div className="space-y-3">
-                {group.rows.map((row) => (
-                  <div key={row.id}>
-                    <p className="text-xs text-gray-500 mb-1 font-medium">
-                      {row.label}
-                    </p>
-                    <div className="flex flex-wrap gap-2">
-                      {row.seats
-                        .sort((a, b) => a.seat_number - b.seat_number)
-                        .map((seat) => (
-                          <button
-                            key={seat.id}
-                            onTouchStart={() => onPointerDown(seat.id)}
-                            onTouchEnd={onPointerUp}
-                            onTouchCancel={onPointerUp}
-                            onMouseDown={() => onPointerDown(seat.id)}
-                            onMouseUp={onPointerUp}
-                            onMouseLeave={onPointerUp}
-                            onClick={() => onSeatClick(seat.id)}
-                            onContextMenu={(e) => e.preventDefault()}
-                            style={{ touchAction: "manipulation", WebkitTouchCallout: "none", WebkitUserSelect: "none" }}
-                            className={`
-                              rounded-2xl border-2 border-black w-12 h-12 flex items-center justify-center
-                              font-bold text-sm transition-all duration-200 active:scale-90 select-none
-                              ${seatColor(seat.status)}
-                            `}
-                          >
-                            {seat.seat_number}
-                          </button>
-                        ))}
+                {group.rows.map((row) => {
+                  const userCanEdit =
+                    isAdmin || !row.assigned_user || row.assigned_user === currentUserId;
+
+                  return (
+                    <div key={row.id}>
+                      <div className="flex items-center gap-2 mb-1">
+                        <p className="text-xs text-gray-500 font-medium">
+                          {row.label}
+                        </p>
+                        {!userCanEdit && (
+                          <span className="text-[10px] text-gray-400 italic">
+                            (assigned to another user)
+                          </span>
+                        )}
+                      </div>
+                      <div className="flex flex-wrap gap-2">
+                        {row.seats
+                          .sort((a, b) => a.seat_number - b.seat_number)
+                          .map((seat) => (
+                            <button
+                              key={seat.id}
+                              onTouchStart={userCanEdit ? () => onPointerDown(seat.id) : undefined}
+                              onTouchEnd={userCanEdit ? onPointerUp : undefined}
+                              onTouchCancel={userCanEdit ? onPointerUp : undefined}
+                              onMouseDown={userCanEdit ? () => onPointerDown(seat.id) : undefined}
+                              onMouseUp={userCanEdit ? onPointerUp : undefined}
+                              onMouseLeave={userCanEdit ? onPointerUp : undefined}
+                              onClick={userCanEdit ? () => onSeatClick(seat.id) : undefined}
+                              onContextMenu={(e) => e.preventDefault()}
+                              style={{ touchAction: "manipulation", WebkitTouchCallout: "none", WebkitUserSelect: "none" }}
+                              className={`
+                                rounded-2xl border-2 border-black w-12 h-12 flex items-center justify-center
+                                font-bold text-sm transition-all duration-200 select-none
+                                ${seatColor(seat.status)}
+                                ${userCanEdit ? "active:scale-90 cursor-pointer" : "opacity-60 cursor-not-allowed"}
+                              `}
+                            >
+                              {seat.seat_number}
+                            </button>
+                          ))}
+                      </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                })}
               </div>
             </div>
           ))}

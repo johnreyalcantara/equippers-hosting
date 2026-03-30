@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { createClient } from "@/lib/supabase/client";
 import { useParams } from "next/navigation";
-import type { Group, RowWithSeats } from "@/types/database";
+import type { Group, RowWithSeats, Profile } from "@/types/database";
 
 export default function SeatingManagementPage() {
   const { id: eventId } = useParams<{ id: string }>();
@@ -11,6 +11,7 @@ export default function SeatingManagementPage() {
   const [groups, setGroups] = useState<(Group & { rows: RowWithSeats[] })[]>(
     []
   );
+  const [users, setUsers] = useState<Profile[]>([]);
   const [newGroupName, setNewGroupName] = useState("");
   const [loading, setLoading] = useState(true);
 
@@ -42,8 +43,17 @@ export default function SeatingManagementPage() {
     setLoading(false);
   }
 
+  async function loadUsers() {
+    const { data } = await supabase
+      .from("profiles")
+      .select("*")
+      .order("full_name", { ascending: true });
+    if (data) setUsers(data);
+  }
+
   useEffect(() => {
     loadGroups();
+    loadUsers();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
@@ -60,7 +70,6 @@ export default function SeatingManagementPage() {
 
   async function deleteGroup(groupId: string) {
     if (!confirm("Delete this group and all its rows/seats?")) return;
-    // Seats cascade from rows, rows cascade from groups
     await supabase.from("groups").delete().eq("id", groupId);
     loadGroups();
   }
@@ -76,7 +85,6 @@ export default function SeatingManagementPage() {
       return;
     }
 
-    // Create the row
     const { data: newRow, error: rowError } = await supabase
       .from("rows")
       .insert({
@@ -92,7 +100,6 @@ export default function SeatingManagementPage() {
       return;
     }
 
-    // Create individual seat records
     const seatRecords = Array.from({ length: seats }, (_, i) => ({
       row_id: newRow.id,
       seat_number: i + 1,
@@ -105,8 +112,15 @@ export default function SeatingManagementPage() {
 
   async function deleteRow(rowId: string) {
     if (!confirm("Delete this row and all its seats?")) return;
-    // Seats cascade from rows
     await supabase.from("rows").delete().eq("id", rowId);
+    loadGroups();
+  }
+
+  async function assignUser(rowId: string, userId: string | null) {
+    await supabase
+      .from("rows")
+      .update({ assigned_user: userId })
+      .eq("id", rowId);
     loadGroups();
   }
 
@@ -125,7 +139,6 @@ export default function SeatingManagementPage() {
       return;
 
     for (const row of sourceGroup.rows) {
-      // Create each row
       const { data: newRow, error: rowError } = await supabase
         .from("rows")
         .insert({
@@ -138,7 +151,6 @@ export default function SeatingManagementPage() {
 
       if (rowError || !newRow) continue;
 
-      // Create seats for the row
       const seatRecords = Array.from(
         { length: row.number_of_seats },
         (_, i) => ({
@@ -164,6 +176,12 @@ export default function SeatingManagementPage() {
         .eq("row_id", rowId);
     }
     loadGroups();
+  }
+
+  function getUserName(userId: string | null) {
+    if (!userId) return null;
+    const user = users.find((u) => u.id === userId);
+    return user?.full_name || user?.email || "Unknown";
   }
 
   if (loading) {
@@ -251,30 +269,62 @@ export default function SeatingManagementPage() {
               <div className="space-y-2">
                 {group.rows.map((row) => {
                   const occupied = row.seats.filter(
-                    (s) => s.status === "occupied"
+                    (s) => s.status === "occupied" || s.status === "vip"
                   ).length;
                   return (
                     <div
                       key={row.id}
-                      className="flex items-center justify-between bg-gray-50 rounded-lg px-3 py-2"
+                      className="bg-gray-50 rounded-lg px-3 py-2"
                     >
-                      <div className="flex items-center gap-3">
-                        <span className="text-sm font-medium">{row.label}</span>
-                        <span className="text-xs text-gray-400">
-                          {row.number_of_seats} seats
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-3">
+                          <span className="text-sm font-medium">
+                            {row.label}
+                          </span>
+                          <span className="text-xs text-gray-400">
+                            {row.number_of_seats} seats
+                          </span>
+                          {occupied > 0 && (
+                            <span className="text-xs text-red-500">
+                              {occupied} occupied
+                            </span>
+                          )}
+                        </div>
+                        <button
+                          onClick={() => deleteRow(row.id)}
+                          className="text-xs text-red-500 hover:text-red-700"
+                        >
+                          Remove
+                        </button>
+                      </div>
+                      {/* Assign user dropdown */}
+                      <div className="mt-1.5 flex items-center gap-2">
+                        <span className="text-[11px] text-gray-400">
+                          Assigned to:
                         </span>
-                        {occupied > 0 && (
-                          <span className="text-xs text-red-500">
-                            {occupied} occupied
+                        <select
+                          value={row.assigned_user ?? ""}
+                          onChange={(e) =>
+                            assignUser(
+                              row.id,
+                              e.target.value === "" ? null : e.target.value
+                            )
+                          }
+                          className="text-xs px-2 py-1 border border-gray-200 rounded-md bg-white focus:outline-none focus:ring-1 focus:ring-blue-500"
+                        >
+                          <option value="">Anyone</option>
+                          {users.map((u) => (
+                            <option key={u.id} value={u.id}>
+                              {u.full_name || u.email}
+                            </option>
+                          ))}
+                        </select>
+                        {row.assigned_user && (
+                          <span className="text-[11px] text-blue-600 font-medium">
+                            {getUserName(row.assigned_user)}
                           </span>
                         )}
                       </div>
-                      <button
-                        onClick={() => deleteRow(row.id)}
-                        className="text-xs text-red-500 hover:text-red-700"
-                      >
-                        Remove
-                      </button>
                     </div>
                   );
                 })}

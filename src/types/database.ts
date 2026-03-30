@@ -33,6 +33,7 @@ export interface Row {
   group_id: string;
   label: string;
   number_of_seats: number;
+  assigned_user: string | null;
   created_at: string;
 }
 
