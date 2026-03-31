@@ -11,6 +11,7 @@ interface SeatingViewProps {
   initialGroups: GroupWithRows[];
   currentUserId: string;
   isAdmin: boolean;
+  readOnly?: boolean;
 }
 
 export default function SeatingView({
@@ -18,6 +19,7 @@ export default function SeatingView({
   initialGroups,
   currentUserId,
   isAdmin,
+  readOnly = false,
 }: SeatingViewProps) {
   const [groups, setGroups] = useState<GroupWithRows[]>(initialGroups);
   const supabase = createClient();
@@ -101,10 +103,10 @@ export default function SeatingView({
   }
 
   function canEditSeat(seatId: string): boolean {
+    if (readOnly) return false;
     if (isAdmin) return true;
     const row = getRowForSeat(seatId);
     if (!row) return false;
-    // No assigned user means anyone can edit
     if (!row.assigned_user) return true;
     return row.assigned_user === currentUserId;
   }
@@ -219,8 +221,8 @@ export default function SeatingView({
               </h3>
               <div className="space-y-3">
                 {group.rows.map((row) => {
-                  const userCanEdit =
-                    isAdmin || !row.assigned_user || row.assigned_user === currentUserId;
+                  const userCanEdit = !readOnly &&
+                    (isAdmin || !row.assigned_user || row.assigned_user === currentUserId);
 
                   return (
                     <div key={row.id}>

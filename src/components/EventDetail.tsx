@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { getEventStatus } from "@/types/database";
 import type { Event, GroupWithRows } from "@/types/database";
 import SeatingView from "./SeatingView";
@@ -18,6 +19,7 @@ export default function EventDetail({
   isAdmin,
 }: EventDetailProps) {
   const status = getEventStatus(event);
+  const [mode, setMode] = useState<"view" | "edit">("view");
 
   return (
     <div>
@@ -51,12 +53,41 @@ export default function EventDetail({
           This event is currently closed. Seating is not available.
         </div>
       ) : (
-        <SeatingView
-          eventId={event.id}
-          initialGroups={groups}
-          currentUserId={currentUserId}
-          isAdmin={isAdmin}
-        />
+        <>
+          {/* Mode toggle */}
+          <div className="flex items-center gap-4 mb-4">
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="radio"
+                name="mode"
+                value="view"
+                checked={mode === "view"}
+                onChange={() => setMode("view")}
+                className="accent-blue-600"
+              />
+              <span className="text-sm font-medium">Viewing</span>
+            </label>
+            <label className="flex items-center gap-1.5 cursor-pointer">
+              <input
+                type="radio"
+                name="mode"
+                value="edit"
+                checked={mode === "edit"}
+                onChange={() => setMode("edit")}
+                className="accent-blue-600"
+              />
+              <span className="text-sm font-medium">Editing</span>
+            </label>
+          </div>
+
+          <SeatingView
+            eventId={event.id}
+            initialGroups={groups}
+            currentUserId={currentUserId}
+            isAdmin={isAdmin}
+            readOnly={mode === "view"}
+          />
+        </>
       )}
     </div>
   );
